@@ -228,7 +228,7 @@ if boton_procesar:
                     if folios_no_encontrados:
                         st.warning(f"⚠️ {len(folios_no_encontrados)} folios no encontrados.")
                         df_missing = pd.DataFrame(folios_no_encontrados, columns=["Folio (No hallado)"]).astype(str)
-                        st.dataframe(df_missing, use_container_width=True)
+                        st.dataframe(df_missing, width="stretch")
 
                     if filas_encontradas:
                         df_exportar = pd.DataFrame(filas_encontradas)
@@ -236,7 +236,7 @@ if boton_procesar:
                         df_final = df_exportar.reindex(columns=lista_columnas_final)
                         
                         st.subheader("📋 Vista Previa")
-                        st.dataframe(df_final, hide_index=True)
+                        st.dataframe(df_final, hide_index=True, column_config={"Contenedor - Folio": st.column_config.Column(pinned=True)})
 
                         # --- CÁLCULO DE PROMEDIOS ---
                         st.subheader("📈 Promedios")
@@ -275,7 +275,7 @@ if boton_procesar:
                                 tabla_agrupada = df_resumen.groupby(col_fecha_etiqueta)[[col_cantidad_sacos]].sum().reset_index()
                                 tabla_agrupada.rename(columns={col_cantidad_sacos: "Total Sacos"}, inplace=True)
                                 
-                                st.dataframe(tabla_agrupada, use_container_width=True, hide_index=True)
+                                st.dataframe(tabla_agrupada, width="stretch", hide_index=True)
                                 
                             except Exception as e:
                                 st.error(f"Error calculando resumen de sacos: {e}")
