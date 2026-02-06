@@ -3,7 +3,6 @@ import pandas as pd
 import re
 from collections import Counter
 import io
-import openpyxl
 import PyPDF2
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
