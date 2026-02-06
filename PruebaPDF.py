@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import re
-import openpyxl
 from collections import Counter
 import io
 import PyPDF2
