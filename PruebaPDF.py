@@ -71,15 +71,15 @@ def detectar_patron_inteligente(texto_sucio):
     return patron_generado, len(candidatos_sanos), comun_prefix, comun_suffix
 
 # --- INTERFAZ DE USUARIO ---
-st.title("📊 Generador de Reportes de Hojuela (Vía PDF)")
-st.markdown("Sube el archivo Excel maestro y el PDF de transporte para cruzar la información.")
+st.title("📊 Generador de Reportes)")
+st.markdown("Sube el archivo Excel maestro y el registro de transporte de carga(en pdf) para cruzar la información.")
 
 # 1. CARGA DE ARCHIVOS
 col1, col2 = st.columns(2)
 with col1:
-    archivo_maestro = st.file_uploader("1️⃣ Cargar Excel Maestro", type=["xlsx"])
+    archivo_maestro = st.file_uploader("1️⃣ Cargar Excel Maestro", type=["xlsx", "xlsm","xlsb","xls","xlt","xltx","xltm","csv"])
 with col2:
-    archivo_pdf = st.file_uploader("2️⃣ Cargar PDF de Transporte", type=["pdf"])
+    archivo_pdf = st.file_uploader("2️⃣ Cargar PDF de registro de transporte de carga", type=["pdf"])
 
 # 2. PROCESAMIENTO INICIAL
 contenedor_final = ""
@@ -154,7 +154,7 @@ if archivo_maestro:
 
 # --- BOTÓN DE PROCESAR FINAL ---
 st.divider()
-boton_procesar = st.button("🚀 Procesar y Generar Excel", type="primary", disabled=(not archivo_pdf or not archivo_maestro))
+boton_procesar = st.button("🚀 Procesar", type="primary", disabled=(not archivo_pdf or not archivo_maestro))
 
 if boton_procesar:
     if not contenedor_final or not patron_final or not cols_seleccionadas_excel:
