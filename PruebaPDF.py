@@ -4,6 +4,10 @@ import re
 from collections import Counter
 import io
 import PyPDF2
+import warnings
+
+# --- CORRECCIÓN DE ADVERTENCIAS ---
+warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Filtro de Pallets", page_icon="📊", layout="wide")
@@ -145,7 +149,6 @@ if archivo_maestro_upload:
                     default=defaults
                 )
                 
-                # Lista negra de columnas que NO queremos promediar
                 columnas_excluidas_promedio = ["Folio", "N° Semana", "Hora", "Cliente", "Fecha Etiqueta", "Motivo Retención", "Verificación de patrones PCC"]
                 
                 opciones_validas_promedio = [
@@ -181,21 +184,35 @@ if boton_procesar:
                 if col_folio_nombre:
                     df_hojuelaavena[col_folio_nombre] = pd.to_numeric(df_hojuelaavena[col_folio_nombre], errors='coerce')
             
-            # 2. Extracción y Recorte
-            hallazgos_crudos = re.findall(patron_final, texto_pdf_final)
-            lista_strings_limpios = [x.replace(" ", "").replace("\n", "") for x in hallazgos_crudos]
-            lista_folios_a_buscar = []
+            # 2. Extracción de Folios Y Sacos del PDF
+            # Construimos un regex que busque el folio seguido de los sacos
+            # patron_final suele terminar en \b, lo quitamos para buscar lo que sigue
+            patron_base = patron_final.rstrip(r'\b')
+            # Buscamos: Folio + Espacios + Numero (Sacos)
+            regex_con_sacos = rf"{patron_base}\s+(\d+)"
+            
+            hallazgos_sacos = re.findall(regex_con_sacos, texto_pdf_final)
+            
+            # Mapa: { Folio_INT : Cantidad_Sacos_INT }
+            mapa_folios_sacos = {}
             
             len_p = len(prefijo_final)
             len_s = len(sufijo_final)
             
-            for s in lista_strings_limpios:
-                if len(s) > (len_p + len_s):
-                    folio_recortado_str = s[len_p : -len_s] if len_s > 0 else s[len_p:]
+            # Procesamos para limpiar el folio (quitar prefijo/sufijo) y guardar los sacos
+            for raw_folio, raw_sacos in hallazgos_sacos:
+                s_clean = raw_folio.replace(" ", "").replace("\n", "")
+                
+                if len(s_clean) > (len_p + len_s):
+                    folio_recortado_str = s_clean[len_p : -len_s] if len_s > 0 else s_clean[len_p:]
                     if folio_recortado_str.isdigit():
-                        lista_folios_a_buscar.append(int(folio_recortado_str))
-            
-            lista_folios_a_buscar = sorted(list(set(lista_folios_a_buscar)))
+                        f_int = int(folio_recortado_str)
+                        s_int = int(raw_sacos)
+                        # Guardamos en el mapa. Si hay duplicados, se sobrescribe (asumimos consistencia)
+                        mapa_folios_sacos[f_int] = s_int
+
+            # Obtenemos la lista de folios únicos a buscar en Excel
+            lista_folios_a_buscar = sorted(list(mapa_folios_sacos.keys()))
             
             total_items = len(lista_folios_a_buscar)
             filas_encontradas = []
@@ -216,7 +233,11 @@ if boton_procesar:
                         if not fila_match.empty:
                             coincidencias += 1
                             datos_fila = fila_match.iloc[0].to_dict()
+                            
+                            # Agregamos datos visuales y los sacos extraídos del PDF
                             datos_fila["Contenedor - Folio"] = f"{contenedor_final} - {folio_buscado}"
+                            datos_fila["Sacos PDF"] = mapa_folios_sacos.get(folio_buscado, 0)
+                            
                             filas_encontradas.append(datos_fila)
                         else:
                             folios_no_encontrados.append(folio_buscado)
@@ -228,22 +249,32 @@ if boton_procesar:
                     if folios_no_encontrados:
                         st.warning(f"⚠️ {len(folios_no_encontrados)} folios no encontrados.")
                         df_missing = pd.DataFrame(folios_no_encontrados, columns=["Folio (No hallado)"]).astype(str)
-                        st.dataframe(df_missing, width="stretch")
+                        st.dataframe(
+                            df_missing, 
+                            use_container_width=True, 
+                            hide_index=True,
+                            column_config={"Folio (No hallado)": st.column_config.Column(pinned=True)}
+                        )
 
                     if filas_encontradas:
                         df_exportar = pd.DataFrame(filas_encontradas)
+                        # Aseguramos que "Sacos PDF" no esté en la vista previa principal si el usuario no la pidió,
+                        # pero la usaremos para cálculos internos.
                         lista_columnas_final = ["Contenedor - Folio"] + cols_seleccionadas_excel
                         df_final = df_exportar.reindex(columns=lista_columnas_final)
                         
                         st.subheader("📋 Vista Previa")
-                        st.dataframe(df_final, hide_index=True, column_config={"Contenedor - Folio": st.column_config.Column(pinned=True)})
+                        st.dataframe(
+                            df_final, 
+                            hide_index=True,
+                            column_config={"Contenedor - Folio": st.column_config.Column(pinned=True)}
+                        )
 
                         # --- CÁLCULO DE PROMEDIOS ---
                         st.subheader("📈 Promedios")
                         if cols_para_promediar:
                             df_proms = df_final[cols_para_promediar].apply(pd.to_numeric, errors='coerce')
                             proms = df_proms.mean().dropna()
-                            
                             if not proms.empty:
                                 st.dataframe(proms.to_frame("Promedio").round(2).T, hide_index=True)
                             else:
@@ -251,36 +282,46 @@ if boton_procesar:
                         else:
                             st.info("No se seleccionaron columnas para promediar.")
 
-                        # --- NUEVO: RESUMEN DE SACOS POR FECHA ---
+                        # --- RESUMEN DE SACOS POR FECHA (USANDO DATOS DEL PDF) ---
                         st.subheader("📅 Resumen Diario de Sacos")
-                        st.info("Formato fecha = año-mes-dia")
                         
                         col_fecha_etiqueta = "Fecha Etiqueta"
-                        col_cantidad_sacos = "Cantidad sacos/maxisaco"
                         
-                        # Verificamos si las columnas existen en el reporte final
-                        if col_fecha_etiqueta in df_final.columns and col_cantidad_sacos in df_final.columns:
+                        # Usamos df_exportar que tiene TODAS las columnas, incluida "Sacos PDF"
+                        if col_fecha_etiqueta in df_exportar.columns:
                             try:
-                                # Trabajamos sobre una copia para no alterar el reporte principal
-                                df_resumen = df_final.copy()
+                                df_resumen = df_exportar.copy()
                                 
-                                # Asegurar que la cantidad es numérica
-                                df_resumen[col_cantidad_sacos] = pd.to_numeric(df_resumen[col_cantidad_sacos], errors='coerce').fillna(0)
-                                
-                                # Normalizar fecha (quitar hora si existe) para agrupar mejor
+                                # Normalizar fecha
                                 if pd.api.types.is_datetime64_any_dtype(df_resumen[col_fecha_etiqueta]):
                                     df_resumen[col_fecha_etiqueta] = df_resumen[col_fecha_etiqueta].dt.date
                                 
-                                # Agrupar y sumar
-                                tabla_agrupada = df_resumen.groupby(col_fecha_etiqueta)[[col_cantidad_sacos]].sum().reset_index()
-                                tabla_agrupada.rename(columns={col_cantidad_sacos: "Total Sacos"}, inplace=True)
+                                # Agrupar por Fecha y Sumar la columna "Sacos PDF"
+                                tabla_agrupada = df_resumen.groupby(col_fecha_etiqueta)[["Sacos PDF"]].sum().reset_index()
+                                tabla_agrupada.rename(columns={"Sacos PDF": "Total Sacos"}, inplace=True)
                                 
-                                st.dataframe(tabla_agrupada, width="stretch", hide_index=True)
+                                # Fila de Total
+                                total_global_sacos = tabla_agrupada["Total Sacos"].sum()
+                                df_total = pd.DataFrame({
+                                    col_fecha_etiqueta: ["TOTAL"], 
+                                    "Total Sacos": [total_global_sacos]
+                                })
+                                
+                                tabla_final_sacos = pd.concat([tabla_agrupada, df_total], ignore_index=True)
+                                
+                                st.dataframe(
+                                    tabla_final_sacos, 
+                                    use_container_width=True, 
+                                    hide_index=True,
+                                    column_config={
+                                        col_fecha_etiqueta: st.column_config.Column(pinned=True)
+                                    }
+                                )
                                 
                             except Exception as e:
                                 st.error(f"Error calculando resumen de sacos: {e}")
                         else:
-                            st.info(f"⚠️ Para ver este resumen, asegúrate de incluir las columnas '{col_fecha_etiqueta}' y '{col_cantidad_sacos}' en el selector de columnas principal (Paso 1).")
+                            st.info(f"⚠️ Para ver este resumen, asegúrate de incluir la columna '{col_fecha_etiqueta}' en el selector de columnas principal.")
 
                         # --- EXPORTAR EXCEL ---
                         output = io.BytesIO()
